@@ -37,7 +37,11 @@ const texts = {
         buyerContact:"Buyer Contact", ordersReceived:"Orders Received", mapTitle:"📍 Our Location – Lake Victoria, Kenya",
         confirmOrder:"Confirm order", updateLocation:"📍 Update My Location", viewOnMap:"View on map",
         locationSaved:"Location saved! Others will see this when you place or receive orders.",
-        status:"Status", registrationSuccess:"Registration successful! Please log in."
+        status:"Status", registrationSuccess:"Registration successful! Please log in.",
+        paymentMethod:"Payment Method", mpesa:"M-Pesa", card:"Credit/Debit Card", cod:"Cash on Delivery",
+        selectPayment:"Select payment method", mpesaInstructions:"You will receive an STK push on your phone",
+        cardInstructions:"Enter your card details below (demo mode)", codInstructions:"Pay when the fish is delivered",
+        cardNumber:"Card Number", cardName:"Name on Card", expiry:"Expiry (MM/YY)", cvv:"CVV", payNow:"Pay Now"
     },
     sw: {
         login:"Ingia", register:"Jiunge", username:"Jina la mtumiaji", password:"Nenosiri", confirmPassword:"Thibitisha nenosiri",
@@ -54,7 +58,11 @@ const texts = {
         invalidLogin:"Jina au nenosiri si sahihi.", listingAdded:"Samaki ameongezwa!", sellerContact:"Mawasiliano ya muuzaji",
         buyerContact:"Mawasiliano ya mnunuzi", ordersReceived:"Maagizo yaliyopokelewa", mapTitle:"📍 Eneo letu – Ziwa Victoria, Kenya",
         confirmOrder:"Thibitisha oda", updateLocation:"📍 Sasisha Eneo Langu", viewOnMap:"Tazama kwenye ramani",
-        locationSaved:"Eneo limehifadhiwa!", status:"Hali", registrationSuccess:"Usajili umefanikiwa! Tafadhali ingia."
+        locationSaved:"Eneo limehifadhiwa!", status:"Hali", registrationSuccess:"Usajili umefanikiwa! Tafadhali ingia.",
+        paymentMethod:"Njia ya Malipo", mpesa:"M-Pesa", card:"Kadi ya Mkopo", cod:"Malipo Ukipewa",
+        selectPayment:"Chagua njia ya malipo", mpesaInstructions:"Utapokea STK kwenye simu yako",
+        cardInstructions:"Weka maelezo ya kadi yako (demo)", codInstructions:"Lipa samaki wakati wa kufikishwa",
+        cardNumber:"Nambari ya Kadi", cardName:"Jina kwenye Kadi", expiry:"Tarehe (MM/YY)", cvv:"CVV", payNow:"Lipia Sasa"
     }
 };
 
@@ -118,18 +126,26 @@ function addNotification(toUsername, type, message) {
     render();
 }
 
-function updateOrderStatus(orderId, newStatus) {
+// Real-time status update - immediate refresh
+window.updateOrderStatus = function(orderId, newStatus) {
     const order = orders.find(o => o.id === orderId);
-    if (!order) return;
+    if (!order) {
+        console.error("Order not found:", orderId);
+        return;
+    }
     order.status = newStatus;
     saveToLocalStorage();
+    
+    // Notify buyer
     const buyer = users.find(u => u.username === order.buyer);
     if (buyer) {
         const statusMsg = (lang === 'en' ? STATUS_DISPLAY.en[newStatus] : STATUS_DISPLAY.sw[newStatus]) || newStatus;
-        addNotification(order.buyer, "order", `Order ${order.id} status: ${statusMsg}`);
+        addNotification(order.buyer, "order", `Order ${order.id} status updated to: ${statusMsg}`);
     }
+    
+    // Re-render immediately to show updated status
     render();
-}
+};
 
 // ----- Helper: render a live map with Google navigation -----
 function renderLiveMap(containerId, targetLat, targetLon, targetLabel, isDeliverer) {
@@ -187,7 +203,7 @@ function renderLiveMap(containerId, targetLat, targetLon, targetLabel, isDeliver
     }
 }
 
-// ----- Render functions (generate HTML strings, with inline onclick handlers) -----
+// ----- Render functions -----
 function renderListingCards(list, isSellerView) {
     if (list.length === 0) return `<p>${t("noListings")}</p>`;
     return `<div class="grid-2">` + list.map(l => {
@@ -224,7 +240,8 @@ function renderOrdersForBuyer(orderList) {
                     <strong>${o.fishType} x ${o.quantity}kg = KES ${o.total}</strong><br>
                     <span style="font-size:0.85rem;">📞 ${t("sellerContact")}: ${o.sellerName} (${o.sellerPhone})</span>
                     ${locationHtml}<br>
-                    <strong>${t("status")}:</strong> ${statusDisplay}
+                    <strong>${t("status")}:</strong> <span class="order-status-${o.id}" style="font-weight:bold; color:#2c4b1e;">${statusDisplay}</span>
+                    ${o.paymentMethod ? `<br><strong>Payment:</strong> ${o.paymentMethod.toUpperCase()}` : ''}
                 </div>
             </div>
             ${hasBothLocs ? `<button onclick="window.toggleMap('buyer-${o.id}')" class="map-toggle-btn">🗺️ Show Live Map</button>
@@ -260,7 +277,8 @@ function renderOrdersForSeller(orderList) {
                     Buyer: ${o.buyerName}<br>
                     <span style="font-size:0.85rem;">📞 ${t("buyerContact")}: ${o.buyerPhone}</span>
                     ${locationHtml}<br>
-                    <strong>${t("status")}:</strong> ${statusDisplay}
+                    <strong>${t("status")}:</strong> <span class="order-status-${o.id}" style="font-weight:bold; color:#2563EB;">${statusDisplay}</span>
+                    ${o.paymentMethod ? `<br><strong>Payment:</strong> ${o.paymentMethod.toUpperCase()}` : ''}
                     ${buttonsHtml}
                 </div>
             </div>
@@ -282,17 +300,43 @@ function renderNotifs(notifList) {
     `).join('');
 }
 
-// ----- Global actions (called by inline onclick) -----
+// ----- Order placement with payment method -----
 window.orderProduct = function(listingId) {
     const listing = listings.find(l => l.id === listingId);
     if (!listing) return;
+    
     const qty = parseFloat(prompt(`Enter kg of ${listing.fishType} (max ${listing.kg}):`, "1"));
     if (isNaN(qty) || qty <= 0 || qty > listing.kg) { alert("Invalid quantity"); return; }
     const total = qty * listing.price;
-    if (confirm(`Order ${qty}kg ${listing.fishType} from ${listing.sellerName} for KES ${total}?`)) {
+    
+    // Show payment method selection
+    let paymentMethod = null;
+    let paymentDetails = {};
+    
+    const paymentChoice = prompt(`Select payment method for ${listing.fishType} x ${qty}kg = KES ${total}:\n1 - M-Pesa\n2 - Credit/Debit Card\n3 - Cash on Delivery`, "1");
+    
+    if (paymentChoice === "1") {
+        paymentMethod = "mpesa";
+        const phone = prompt("Enter M-Pesa phone number (e.g., 0712345678):");
+        if (!phone) { alert("Payment cancelled"); return; }
+        paymentDetails = { phone: phone };
+    } else if (paymentChoice === "2") {
+        paymentMethod = "card";
+        const cardNumber = prompt("Enter card number (demo: 4242 4242 4242 4242):");
+        if (!cardNumber) { alert("Payment cancelled"); return; }
+        paymentDetails = { cardLast4: cardNumber.slice(-4) };
+    } else if (paymentChoice === "3") {
+        paymentMethod = "cod";
+        paymentDetails = {};
+    } else {
+        alert("Invalid payment option");
+        return;
+    }
+    
+    if (confirm(`Confirm order: ${qty}kg ${listing.fishType} from ${listing.sellerName} for KES ${total} using ${paymentMethod.toUpperCase()}?`)) {
         getUserLocation((coords) => {
             const newOrder = {
-                id: Date.now().toString(),
+                id: "#AMZ-" + Math.floor(Math.random() * 10000).toString().padStart(4, '0'),
                 buyer: currentUser.username,
                 buyerName: currentUser.name,
                 buyerPhone: currentUser.phone,
@@ -308,22 +352,107 @@ window.orderProduct = function(listingId) {
                 quantity: qty,
                 total: total,
                 status: "pending",
-                timestamp: Date.now()
+                paymentMethod: paymentMethod,
+                paymentDetails: paymentDetails,
+                timestamp: Date.now(),
+                createdAt: new Date().toISOString()
             };
             orders.push(newOrder);
             listing.kg -= qty;
             if (listing.kg <= 0) listings = listings.filter(l => l.id !== listing.id);
             saveToLocalStorage();
-            addNotification(listing.seller, "order", `New order from ${currentUser.name}: ${qty}kg ${listing.fishType}. Contact: ${currentUser.phone}`);
-            alert(t("orderPlaced"));
+            addNotification(listing.seller, "order", `New order from ${currentUser.name}: ${qty}kg ${listing.fishType}, total KES ${total}. Payment: ${paymentMethod.toUpperCase()}. Contact: ${currentUser.phone}`);
+            alert(t("orderPlaced") + ` Payment: ${paymentMethod.toUpperCase()}`);
             render();
         });
     }
 };
 
-window.updateOrderStatus = function(orderId, newStatus) {
-    updateOrderStatus(orderId, newStatus);
-};
+// ----- USSD order with payment method -----
+function simulateUSSD() {
+    if (listings.length === 0) { alert(t("noListings")); return; }
+    let step = 1;
+    let selectedListing = null;
+    let quantity = 0;
+    let paymentMethod = null;
+    let paymentDetails = {};
+    
+    function ussdPrompt() {
+        if (step === 1) {
+            let msg = "USSD: Select fish type:\n";
+            listings.forEach((l, idx) => { msg += `${idx+1}. ${l.fishType} (${l.kg}kg, ${l.price}KES/kg)\n`; });
+            msg += "0. Cancel";
+            const choice = prompt(msg);
+            if (choice && choice !== "0") {
+                const idx = parseInt(choice)-1;
+                if (listings[idx]) { selectedListing = listings[idx]; step=2; ussdPrompt(); }
+                else { alert("Invalid choice"); step=1; ussdPrompt(); }
+            } else { alert("Order cancelled"); return; }
+        } else if (step === 2) {
+            const kgInput = prompt(`How many kg of ${selectedListing.fishType}? Max ${selectedListing.kg}kg`);
+            const kg = parseFloat(kgInput);
+            if (!isNaN(kg) && kg>0 && kg<=selectedListing.kg) {
+                quantity = kg;
+                step=3;
+                ussdPrompt();
+            } else { alert("Invalid quantity"); step=2; ussdPrompt(); }
+        } else if (step === 3) {
+            const total = quantity * selectedListing.price;
+            const paymentChoice = prompt(`Total: KES ${total}\nSelect payment:\n1-M-Pesa\n2-Cash on Delivery\n3-Credit/Debit Card`, "1");
+            if (paymentChoice === "1") {
+                paymentMethod = "mpesa";
+                const phone = prompt("Enter M-Pesa phone number:");
+                if (!phone) { alert("Cancelled"); return; }
+                paymentDetails = { phone: phone };
+            } else if (paymentChoice === "2") {
+                paymentMethod = "cod";
+                paymentDetails = {};
+            } else if (paymentChoice === "3") {
+                paymentMethod = "card";
+                const cardNum = prompt("Enter card number last 4 digits (demo):");
+                paymentDetails = { cardLast4: cardNum ? cardNum.slice(-4) : "4242" };
+            } else {
+                alert("Invalid payment option");
+                return;
+            }
+            
+            if (confirm(`Confirm order: ${quantity}kg of ${selectedListing.fishType} from ${selectedListing.sellerName}. Total KES ${total}. Payment: ${paymentMethod.toUpperCase()}. OK?`)) {
+                getUserLocation((coords) => {
+                    const newOrder = {
+                        id: "#AMZ-" + Math.floor(Math.random() * 10000).toString().padStart(4, '0'),
+                        buyer: currentUser.username,
+                        buyerName: currentUser.name,
+                        buyerPhone: currentUser.phone,
+                        buyerPhoto: currentUser.photoUrl || "",
+                        buyerLocation: coords || currentUser.location,
+                        seller: selectedListing.seller,
+                        sellerName: selectedListing.sellerName,
+                        sellerPhone: selectedListing.sellerPhone,
+                        sellerPhoto: selectedListing.sellerPhoto || "",
+                        sellerLocation: selectedListing.sellerLocation || null,
+                        listingId: selectedListing.id,
+                        fishType: selectedListing.fishType,
+                        quantity: quantity,
+                        total: total,
+                        status: "pending",
+                        paymentMethod: paymentMethod,
+                        paymentDetails: paymentDetails,
+                        timestamp: Date.now(),
+                        createdAt: new Date().toISOString()
+                    };
+                    orders.push(newOrder);
+                    selectedListing.kg -= quantity;
+                    if (selectedListing.kg <= 0) listings = listings.filter(l => l.id !== selectedListing.id);
+                    saveToLocalStorage();
+                    addNotification(selectedListing.seller, "order", `New order via USSD from ${currentUser.name}: ${quantity}kg of ${selectedListing.fishType}, total KES ${total}. Payment: ${paymentMethod.toUpperCase()}. Contact buyer: ${currentUser.phone}`);
+                    alert(t("orderPlaced"));
+                    render();
+                });
+            } else { alert("Cancelled"); }
+        }
+    }
+    ussdPrompt();
+}
 
 window.markNotificationRead = function(notifId) {
     const notif = notifications.find(n => n.id == notifId);
@@ -358,73 +487,10 @@ window.toggleMap = function(ref) {
     }
 };
 
-function simulateUSSD() {
-    if (listings.length === 0) { alert(t("noListings")); return; }
-    let step = 1;
-    let selectedListing = null;
-    let quantity = 0;
-    function ussdPrompt() {
-        if (step === 1) {
-            let msg = "USSD: Select fish type:\n";
-            listings.forEach((l, idx) => { msg += `${idx+1}. ${l.fishType} (${l.kg}kg, ${l.price}KES/kg)\n`; });
-            msg += "0. Cancel";
-            const choice = prompt(msg);
-            if (choice && choice !== "0") {
-                const idx = parseInt(choice)-1;
-                if (listings[idx]) { selectedListing = listings[idx]; step=2; ussdPrompt(); }
-                else { alert("Invalid choice"); step=1; ussdPrompt(); }
-            } else { alert("Order cancelled"); return; }
-        } else if (step === 2) {
-            const kgInput = prompt(`How many kg of ${selectedListing.fishType}? Max ${selectedListing.kg}kg`);
-            const kg = parseFloat(kgInput);
-            if (!isNaN(kg) && kg>0 && kg<=selectedListing.kg) {
-                quantity = kg;
-                step=3;
-                ussdPrompt();
-            } else { alert("Invalid quantity"); step=2; ussdPrompt(); }
-        } else if (step === 3) {
-            const total = quantity * selectedListing.price;
-            if (confirm(`Confirm order: ${quantity}kg of ${selectedListing.fishType} from ${selectedListing.sellerName}. Total KES ${total}. OK?`)) {
-                getUserLocation((coords) => {
-                    const buyerLocation = coords || (currentUser.location || null);
-                    const newOrder = {
-                        id: Date.now().toString(),
-                        buyer: currentUser.username,
-                        buyerName: currentUser.name,
-                        buyerPhone: currentUser.phone,
-                        buyerPhoto: currentUser.photoUrl || "",
-                        buyerLocation: buyerLocation,
-                        seller: selectedListing.seller,
-                        sellerName: selectedListing.sellerName,
-                        sellerPhone: selectedListing.sellerPhone,
-                        sellerPhoto: selectedListing.sellerPhoto || "",
-                        sellerLocation: selectedListing.sellerLocation || null,
-                        listingId: selectedListing.id,
-                        fishType: selectedListing.fishType,
-                        quantity: quantity,
-                        total: total,
-                        status: "pending",
-                        timestamp: Date.now()
-                    };
-                    orders.push(newOrder);
-                    selectedListing.kg -= quantity;
-                    if (selectedListing.kg <= 0) listings = listings.filter(l => l.id !== selectedListing.id);
-                    saveToLocalStorage();
-                    addNotification(selectedListing.seller, "order", `New order via USSD from ${currentUser.name}: ${quantity}kg of ${selectedListing.fishType}, total KES ${total}. Contact buyer: ${currentUser.phone}`);
-                    alert(t("orderPlaced"));
-                    render();
-                });
-            } else { alert("Cancelled"); }
-        }
-    }
-    ussdPrompt();
-}
-
 // ----- LOGIN & REGISTRATION FUNCTIONS -----
 window.handleLogin = function() {
     const uname = document.getElementById("login-username").value.trim();
     const pwd = document.getElementById("login-password").value;
-    console.log("Attempting login with:", uname);
     const user = users.find(u => u.username === uname && u.password === pwd);
     if (user) {
         currentUser = { ...user };
@@ -547,162 +613,4 @@ window.askAI = function() {
 window.raiseAlarm = function() {
     const msg = prompt(t("alarmMessage"), "I have excess fish");
     if (msg) {
-        users.filter(u => u.role === "seller" && u.username !== currentUser.username).forEach(s => addNotification(s.username, "alarm", `${currentUser.name}: ${msg}`));
-        alert("Alarm sent to other sellers");
-    }
-};
-
-window.updateUserLocation = function() {
-    getUserLocation((coords) => {
-        if (coords) {
-            currentUser.location = coords;
-            const dbUser = users.find(u => u.username === currentUser.username);
-            if (dbUser) dbUser.location = coords;
-            saveToLocalStorage();
-            alert(t("locationSaved"));
-            render();
-        }
-    });
-};
-
-window.logout = function() {
-    currentUser = null;
-    saveToLocalStorage();
-    render();
-};
-
-window.filterListings = function() {
-    const term = document.getElementById("search-fish").value.toLowerCase();
-    const filtered = listings.filter(l => l.fishType.toLowerCase().includes(term));
-    document.getElementById("listings-container").innerHTML = renderListingCards(filtered, false);
-};
-
-// ----- Render Auth or Dashboard -----
-function renderAuth(container) {
-    container.innerHTML = `
-        <div class="card" id="login-card">
-            <h2>${t("login")}</h2>
-            <input type="text" id="login-username" placeholder="${t("username")}">
-            <input type="password" id="login-password" placeholder="${t("password")}">
-            <button onclick="window.handleLogin()">${t("loginBtn")}</button>
-            <button onclick="window.handleGoogleLogin()" class="btn-secondary">${t("loginGoogle")}</button>
-            <hr>
-            <p><a href="#" onclick="window.showRegisterForm(); return false;">${t("switchToRegister")}</a></p>
-        </div>
-        <div class="card" id="register-card" style="display:none">
-            <h2>${t("register")}</h2>
-            <input type="text" id="reg-username" placeholder="${t("username")}">
-            <input type="password" id="reg-password" placeholder="${t("password")}">
-            <input type="password" id="reg-confirm" placeholder="${t("confirmPassword")}">
-            <select id="reg-role"><option value="seller">${t("seller")}</option><option value="buyer">${t("buyer")}</option></select>
-            <input type="text" id="reg-name" placeholder="${t("fullName")}">
-            <input type="text" id="reg-phone" placeholder="${t("phone")}">
-            <input type="text" id="reg-beach" placeholder="${t("beach")}">
-            <input type="file" id="reg-photo" accept="image/*">
-            <button onclick="window.handleRegister()">${t("registerBtn")}</button>
-            <hr>
-            <p><a href="#" onclick="window.showLoginForm(); return false;">${t("switchToLogin")}</a></p>
-        </div>
-    `;
-}
-
-function renderSellerDashboard(container) {
-    const myListings = listings.filter(l => l.seller === currentUser.username);
-    const myOrdersReceived = orders.filter(o => o.seller === currentUser.username);
-    const userNotifs = notifications.filter(n => n.toUser === currentUser.username);
-    container.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-            <div style="display:flex; align-items:center; gap:15px;">
-                ${currentUser.photoUrl ? `<img src="${currentUser.photoUrl}" class="profile-pic">` : `<i class="fas fa-user-circle profile-pic" style="font-size:60px; color:gold;"></i>`}
-                <h2>${t("welcome")} ${currentUser.name} (${t("seller")})</h2>
-            </div>
-            <div>
-                <button onclick="window.updateUserLocation()" class="btn-secondary">📍 ${t("updateLocation")}</button>
-                <button onclick="window.logout()" class="btn-secondary">${t("logout")}</button>
-            </div>
-        </div>
-        <div class="grid-2">
-            <div class="card">
-                <h3>${t("addFish")}</h3>
-                <select id="fish-type">${fishTypes.map(f => `<option>${f}</option>`).join('')}</select>
-                <input type="number" id="fish-kg" placeholder="${t("kgAvailable")}">
-                <input type="number" id="fish-price" placeholder="${t("pricePerKg")}">
-                <select id="fish-gutted"><option value="yes">${t("yes")}</option><option value="no">${t("no")}</option></select>
-                <button onclick="window.publishListing()">${t("submitListing")}</button>
-            </div>
-            <div class="card">
-                <h3>${t("aiAssistant")}</h3>
-                <p id="ai-tip">💡 Click below for preservation advice</p>
-                <button onclick="window.askAI()">${t("askAI")}</button>
-            </div>
-        </div>
-        <div class="card"><h3>${t("myListings")}</h3><div id="seller-listings">${renderListingCards(myListings, true)}</div></div>
-        <div class="card"><h3>${t("ordersReceived")}</h3><div id="orders-received">${renderOrdersForSeller(myOrdersReceived)}</div></div>
-        <div class="card"><h3>${t("notificationsTitle")} (${userNotifs.filter(n=>!n.read).length})</h3>
-            <div id="seller-notifs">${renderNotifs(userNotifs)}</div>
-            <button onclick="window.raiseAlarm()" class="btn-secondary">${t("raiseAlarm")}</button>
-        </div>
-    `;
-}
-
-function renderBuyerDashboard(container) {
-    const myOrders = orders.filter(o => o.buyer === currentUser.username);
-    const buyerNotifs = notifications.filter(n => n.toUser === currentUser.username);
-    container.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-            <div style="display:flex; gap:15px; align-items:center;">
-                ${currentUser.photoUrl ? `<img src="${currentUser.photoUrl}" class="profile-pic">` : `<i class="fas fa-user-circle profile-pic" style="font-size:60px;"></i>`}
-                <h2>${t("welcome")} ${currentUser.name} (${t("buyer")})</h2>
-            </div>
-            <div>
-                <button onclick="window.updateUserLocation()" class="btn-secondary">📍 ${t("updateLocation")}</button>
-                <button onclick="window.logout()" class="btn-secondary">${t("logout")}</button>
-            </div>
-        </div>
-        <div class="card">
-            <h3>${t("notificationsTitle")} <span class="notification-badge">${buyerNotifs.filter(n=>!n.read).length}</span></h3>
-            <div id="buyer-notifs">${renderNotifs(buyerNotifs)}</div>
-            <button onclick="window.simulateUSSD()" class="btn-secondary">${t("ussdOrder")}</button>
-        </div>
-        <div class="card">
-            <h3>${t("availableFish")}</h3>
-            <input type="text" id="search-fish" placeholder="${t("search")}" onkeyup="window.filterListings()">
-            <div id="listings-container">${renderListingCards(listings, false)}</div>
-        </div>
-        <div class="card">
-            <h3>${t("myOrders")}</h3>
-            <div id="my-orders">${renderOrdersForBuyer(myOrders)}</div>
-        </div>
-    `;
-}
-
-function render() {
-    const main = document.getElementById("main-content");
-    if (!main) return;
-    if (!currentUser) renderAuth(main);
-    else if (currentUser.role === "seller") renderSellerDashboard(main);
-    else renderBuyerDashboard(main);
-    updateLanguageButtons();
-}
-
-function updateLanguageButtons() {
-    const enBtn = document.getElementById("btn-en");
-    const swBtn = document.getElementById("btn-sw");
-    if (enBtn && swBtn) {
-        enBtn.onclick = () => { lang = "en"; render(); };
-        swBtn.onclick = () => { lang = "sw"; render(); };
-        if (lang === "en") { enBtn.classList.add("lang-active"); swBtn.classList.remove("lang-active"); }
-        else { swBtn.classList.add("lang-active"); enBtn.classList.remove("lang-active"); }
-    }
-    const mapTitle = document.getElementById("map-title");
-    if (mapTitle) mapTitle.innerText = t("mapTitle");
-    const footerTitle = document.getElementById("footer-partners-title");
-    if (footerTitle) footerTitle.innerHTML = "🤝 " + (lang === "en" ? "Our Partners" : "Washirika Wetu");
-    const footerText = document.getElementById("footer-text");
-    if (footerText) footerText.innerText = lang === "en" ? "🐟 Empowering Lake Victoria fishing communities | Powered by wisdom & conscience" : "🐟 Kuwasaidia wavuvi wa Ziwa Victoria | Kwa hekima na dhamiri";
-}
-
-window.simulateUSSD = simulateUSSD;
-
-loadData();
-render();
+        users.filter(u => u.role === "seller" && u.username !== currentUser.username).forEach(s => addNotification(s.username, "alarm", `${
