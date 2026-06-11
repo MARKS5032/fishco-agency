@@ -613,4 +613,162 @@ window.askAI = function() {
 window.raiseAlarm = function() {
     const msg = prompt(t("alarmMessage"), "I have excess fish");
     if (msg) {
-        users.filter(u => u.role === "seller" && u.username !== currentUser.username).forEach(s => addNotification(s.username, "alarm", `${
+        users.filter(u => u.role === "seller" && u.username !== currentUser.username).forEach(s => addNotification(s.username, "alarm", `${currentUser.name}: ${msg}`));
+        alert("Alarm sent to other sellers");
+    }
+};
+
+window.updateUserLocation = function() {
+    getUserLocation((coords) => {
+        if (coords) {
+            currentUser.location = coords;
+            const dbUser = users.find(u => u.username === currentUser.username);
+            if (dbUser) dbUser.location = coords;
+            saveToLocalStorage();
+            alert(t("locationSaved"));
+            render();
+        }
+    });
+};
+
+window.logout = function() {
+    currentUser = null;
+    saveToLocalStorage();
+    render();
+};
+
+window.filterListings = function() {
+    const term = document.getElementById("search-fish").value.toLowerCase();
+    const filtered = listings.filter(l => l.fishType.toLowerCase().includes(term));
+    document.getElementById("listings-container").innerHTML = renderListingCards(filtered, false);
+};
+
+// ----- Render Auth or Dashboard -----
+function renderAuth(container) {
+    container.innerHTML = `
+        <div class="card" id="login-card">
+            <h2>${t("login")}</h2>
+            <input type="text" id="login-username" placeholder="${t("username")}">
+            <input type="password" id="login-password" placeholder="${t("password")}">
+            <button onclick="window.handleLogin()">${t("loginBtn")}</button>
+            <button onclick="window.handleGoogleLogin()" class="btn-secondary">${t("loginGoogle")}</button>
+            <hr>
+            <p><a href="#" onclick="window.showRegisterForm(); return false;">${t("switchToRegister")}</a></p>
+        </div>
+        <div class="card" id="register-card" style="display:none">
+            <h2>${t("register")}</h2>
+            <input type="text" id="reg-username" placeholder="${t("username")}">
+            <input type="password" id="reg-password" placeholder="${t("password")}">
+            <input type="password" id="reg-confirm" placeholder="${t("confirmPassword")}">
+            <select id="reg-role"><option value="seller">${t("seller")}</option><option value="buyer">${t("buyer")}</option></select>
+            <input type="text" id="reg-name" placeholder="${t("fullName")}">
+            <input type="text" id="reg-phone" placeholder="${t("phone")}">
+            <input type="text" id="reg-beach" placeholder="${t("beach")}">
+            <input type="file" id="reg-photo" accept="image/*">
+            <button onclick="window.handleRegister()">${t("registerBtn")}</button>
+            <hr>
+            <p><a href="#" onclick="window.showLoginForm(); return false;">${t("switchToLogin")}</a></p>
+        </div>
+    `;
+}
+
+function renderSellerDashboard(container) {
+    const myListings = listings.filter(l => l.seller === currentUser.username);
+    const myOrdersReceived = orders.filter(o => o.seller === currentUser.username);
+    const userNotifs = notifications.filter(n => n.toUser === currentUser.username);
+    container.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:15px;">
+                ${currentUser.photoUrl ? `<img src="${currentUser.photoUrl}" class="profile-pic">` : `<i class="fas fa-user-circle profile-pic" style="font-size:60px; color:gold;"></i>`}
+                <h2>${t("welcome")} ${currentUser.name} (${t("seller")})</h2>
+            </div>
+            <div>
+                <button onclick="window.updateUserLocation()" class="btn-secondary">📍 ${t("updateLocation")}</button>
+                <button onclick="window.logout()" class="btn-secondary">${t("logout")}</button>
+            </div>
+        </div>
+        <div class="grid-2">
+            <div class="card">
+                <h3>${t("addFish")}</h3>
+                <select id="fish-type">${fishTypes.map(f => `<option>${f}</option>`).join('')}</select>
+                <input type="number" id="fish-kg" placeholder="${t("kgAvailable")}">
+                <input type="number" id="fish-price" placeholder="${t("pricePerKg")}">
+                <select id="fish-gutted"><option value="yes">${t("yes")}</option><option value="no">${t("no")}</option></select>
+                <button onclick="window.publishListing()">${t("submitListing")}</button>
+            </div>
+            <div class="card">
+                <h3>${t("aiAssistant")}</h3>
+                <p id="ai-tip">💡 Click below for preservation advice</p>
+                <button onclick="window.askAI()">${t("askAI")}</button>
+            </div>
+        </div>
+        <div class="card"><h3>${t("myListings")}</h3><div id="seller-listings">${renderListingCards(myListings, true)}</div></div>
+        <div class="card"><h3>${t("ordersReceived")}</h3><div id="orders-received">${renderOrdersForSeller(myOrdersReceived)}</div></div>
+        <div class="card"><h3>${t("notificationsTitle")} (${userNotifs.filter(n=>!n.read).length})</h3>
+            <div id="seller-notifs">${renderNotifs(userNotifs)}</div>
+            <button onclick="window.raiseAlarm()" class="btn-secondary">${t("raiseAlarm")}</button>
+        </div>
+    `;
+}
+
+function renderBuyerDashboard(container) {
+    const myOrders = orders.filter(o => o.buyer === currentUser.username);
+    const buyerNotifs = notifications.filter(n => n.toUser === currentUser.username);
+    container.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; gap:15px; align-items:center;">
+                ${currentUser.photoUrl ? `<img src="${currentUser.photoUrl}" class="profile-pic">` : `<i class="fas fa-user-circle profile-pic" style="font-size:60px;"></i>`}
+                <h2>${t("welcome")} ${currentUser.name} (${t("buyer")})</h2>
+            </div>
+            <div>
+                <button onclick="window.updateUserLocation()" class="btn-secondary">📍 ${t("updateLocation")}</button>
+                <button onclick="window.logout()" class="btn-secondary">${t("logout")}</button>
+            </div>
+        </div>
+        <div class="card">
+            <h3>${t("notificationsTitle")} <span class="notification-badge">${buyerNotifs.filter(n=>!n.read).length}</span></h3>
+            <div id="buyer-notifs">${renderNotifs(buyerNotifs)}</div>
+            <button onclick="window.simulateUSSD()" class="btn-secondary">${t("ussdOrder")}</button>
+        </div>
+        <div class="card">
+            <h3>${t("availableFish")}</h3>
+            <input type="text" id="search-fish" placeholder="${t("search")}" onkeyup="window.filterListings()">
+            <div id="listings-container">${renderListingCards(listings, false)}</div>
+        </div>
+        <div class="card">
+            <h3>${t("myOrders")}</h3>
+            <div id="my-orders">${renderOrdersForBuyer(myOrders)}</div>
+        </div>
+    `;
+}
+
+function render() {
+    const main = document.getElementById("main-content");
+    if (!main) return;
+    if (!currentUser) renderAuth(main);
+    else if (currentUser.role === "seller") renderSellerDashboard(main);
+    else renderBuyerDashboard(main);
+    updateLanguageButtons();
+}
+
+function updateLanguageButtons() {
+    const enBtn = document.getElementById("btn-en");
+    const swBtn = document.getElementById("btn-sw");
+    if (enBtn && swBtn) {
+        enBtn.onclick = () => { lang = "en"; render(); };
+        swBtn.onclick = () => { lang = "sw"; render(); };
+        if (lang === "en") { enBtn.classList.add("lang-active"); swBtn.classList.remove("lang-active"); }
+        else { swBtn.classList.add("lang-active"); enBtn.classList.remove("lang-active"); }
+    }
+    const mapTitle = document.getElementById("map-title");
+    if (mapTitle) mapTitle.innerText = t("mapTitle");
+    const footerTitle = document.getElementById("footer-partners-title");
+    if (footerTitle) footerTitle.innerHTML = "🤝 " + (lang === "en" ? "Our Partners" : "Washirika Wetu");
+    const footerText = document.getElementById("footer-text");
+    if (footerText) footerText.innerText = lang === "en" ? "🐟 Empowering Lake Victoria fishing communities | Powered by wisdom & conscience" : "🐟 Kuwasaidia wavuvi wa Ziwa Victoria | Kwa hekima na dhamiri";
+}
+
+window.simulateUSSD = simulateUSSD;
+
+loadData();
+render();
