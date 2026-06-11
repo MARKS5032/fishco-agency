@@ -420,9 +420,9 @@ function simulateUSSD() {
     ussdPrompt();
 }
 
-// Replace the existing handleLogin with this
+// ----- LOGIN & REGISTRATION FUNCTIONS -----
 window.handleLogin = function() {
-    const uname = document.getElementById("login-username").value.trim();  // TRIM!
+    const uname = document.getElementById("login-username").value.trim();
     const pwd = document.getElementById("login-password").value;
     console.log("Attempting login with:", uname);
     const user = users.find(u => u.username === uname && u.password === pwd);
@@ -448,7 +448,6 @@ window.handleGoogleLogin = function() {
     }
 };
 
-// Replace the existing handleRegister with this (ensures trim and clear feedback)
 window.handleRegister = function() {
     const uname = document.getElementById("reg-username").value.trim();
     const pwd = document.getElementById("reg-password").value;
@@ -485,10 +484,8 @@ window.handleRegister = function() {
         });
         saveToLocalStorage();
         alert(t("registrationSuccess"));
-        // Switch back to login form
         document.getElementById("login-card").style.display = "block";
         document.getElementById("register-card").style.display = "none";
-        // Clear fields
         document.getElementById("reg-username").value = "";
         document.getElementById("reg-password").value = "";
         document.getElementById("reg-confirm").value = "";
@@ -504,12 +501,6 @@ window.handleRegister = function() {
     } else {
         finish("");
     }
-};
-    if (photoFile) {
-        const reader = new FileReader();
-        reader.onload = (e) => finish(e.target.result);
-        reader.readAsDataURL(photoFile);
-    } else finish("");
 };
 
 window.showRegisterForm = function() {
@@ -580,7 +571,6 @@ window.logout = function() {
     render();
 };
 
-// ----- Search filter for buyer dashboard -----
 window.filterListings = function() {
     const term = document.getElementById("search-fish").value.toLowerCase();
     const filtered = listings.filter(l => l.fishType.toLowerCase().includes(term));
@@ -712,9 +702,7 @@ function updateLanguageButtons() {
     if (footerText) footerText.innerText = lang === "en" ? "🐟 Empowering Lake Victoria fishing communities | Powered by wisdom & conscience" : "🐟 Kuwasaidia wavuvi wa Ziwa Victoria | Kwa hekima na dhamiri";
 }
 
-// Export needed functions to window for inline onclick calls
 window.simulateUSSD = simulateUSSD;
-window.filterListings = window.filterListings;
 
 loadData();
 render();
