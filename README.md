@@ -3,7 +3,7 @@ FISHCo AGENCY – Lake Victoria Fish Marketplace
 FISHCo AGENCY is a bilingual (English/Kiswahili) digital marketplace connecting fishing communities around Lake Victoria, Kenya. It enables fish sellers (fishermen, beach cooperatives) to list their catch and buyers (local traders, households, restaurants) to order directly – reducing post-harvest losses, increasing incomes, and building trust through transparency.
 
 Live Demo: https://fishco-agency.vercel.app/
-Repository:
+Repository:https://github.com/MARKS5032/fishco-agency
 
 Features
 
